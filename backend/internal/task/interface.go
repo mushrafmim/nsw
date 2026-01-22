@@ -5,7 +5,6 @@ import (
 
 	"github.com/OpenNSW/nsw/internal/workflow/model"
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 // Task represents a unit of work in the workflow system
@@ -20,7 +19,7 @@ type Task interface {
 	GetID() uuid.UUID
 
 	// CanExecute checks if the task is ready to be executed
-	CanExecute(ctx context.Context, taskCtx *TaskContext) (bool, error)
+	CanExecute() (bool, error)
 }
 
 // TaskResult represents the outcome of task execution
@@ -33,6 +32,4 @@ type TaskResult struct {
 type TaskContext struct {
 	Task          *model.Task // Full task model with all task-level information
 	ConsignmentID uuid.UUID
-	AssigneeID    uuid.UUID
-	Tx            *gorm.DB // Database transaction handle for task implementations to participate in the transaction
 }
