@@ -2,17 +2,7 @@
 
 const API_BASE_URL = (import.meta.env.VITE_OGA_API_BASE_URL as string | undefined) ?? 'http://localhost:8081';
 
-export type Decision = 'APPROVED' | 'REJECTED' | null;
-
-export interface ApproveRequest {
-  formData: Record<string, unknown>;
-  workflowId: string;
-  decision: Decision;
-  reviewerName: string;
-  comments?: string;
-}
-
-export interface ApproveResponse {
+export interface ReviewResponse {
   success: boolean;
   message?: string;
   error?: string;
@@ -23,6 +13,10 @@ export interface OGAApplication {
   workflowId: string;
   serviceUrl: string;
   data: Record<string, unknown>;
+  meta?: {
+    type: string;
+    verificationId: string;
+  };
   status: string;
   reviewerNotes?: string;
   reviewedAt?: string;
@@ -57,32 +51,18 @@ export async function fetchApplicationDetail(taskId: string, signal?: AbortSigna
   return response.json() as Promise<OGAApplication>;
 }
 
-// Submit approval for a task via OGA Service
-// OGA Service sends callback to the originating service
-export async function approveTask(
+// Submit review for a task via OGA Service
+export async function submitReview(
   taskId: string,
-  _workflowId: string,
-  requestBody: ApproveRequest,
+  formValues: Record<string, unknown>,
   signal?: AbortSignal
-): Promise<ApproveResponse> {
-  // Build reviewer notes from comments and reviewer name
-  const reviewerNotes = [
-    `Reviewer: ${requestBody.reviewerName}`,
-    requestBody.comments ? `Comments: ${requestBody.comments}` : '',
-    requestBody.formData && Object.keys(requestBody.formData).length > 0
-      ? `Form Data: ${JSON.stringify(requestBody.formData)}`
-      : ''
-  ].filter(Boolean).join('\n');
-
+): Promise<ReviewResponse> {
   const response = await fetch(`${API_BASE_URL}/api/oga/applications/${taskId}/review`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      decision: requestBody.decision,
-      reviewerNotes: reviewerNotes,
-    }),
+    body: JSON.stringify(formValues),
     signal,
   });
 
@@ -91,5 +71,5 @@ export async function approveTask(
     throw new Error(errorData.error ?? `Failed to submit review: ${response.statusText}`);
   }
 
-  return response.json() as Promise<ApproveResponse>;
+  return response.json() as Promise<ReviewResponse>;
 }
