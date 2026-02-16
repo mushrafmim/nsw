@@ -1,4 +1,5 @@
 // API service for OGA Portal
+import type {JsonSchema, UISchemaElement} from "./components/JsonForm";
 
 const API_BASE_URL = (import.meta.env.VITE_OGA_API_BASE_URL as string | undefined) ?? 'http://localhost:8081';
 
@@ -17,6 +18,10 @@ export interface OGAApplication {
     type: string;
     verificationId: string;
   };
+  form: {
+    schema: JsonSchema;
+    uiSchema: UISchemaElement;
+  };
   status: string;
   reviewerNotes?: string;
   reviewedAt?: string;
@@ -29,17 +34,31 @@ export interface OGAApplication {
 }
 
 
-export async function fetchPendingApplications(status?: string, signal?: AbortSignal): Promise<OGAApplication[]> {
-  const url = status
-    ? `${API_BASE_URL}/api/oga/applications?status=${status}`
-    : `${API_BASE_URL}/api/oga/applications`;
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export async function fetchApplications(
+  params?: { status?: string; page?: number; pageSize?: number },
+  signal?: AbortSignal
+): Promise<PaginatedResponse<OGAApplication>> {
+  const searchParams = new URLSearchParams();
+  if (params?.status) searchParams.set('status', params.status);
+  if (params?.page) searchParams.set('page', String(params.page));
+  if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
+
+  const query = searchParams.toString();
+  const url = `${API_BASE_URL}/api/oga/applications${query ? `?${query}` : ''}`;
 
   const response = await fetch(url, { signal });
   if (!response.ok) {
     throw new Error(`Failed to fetch pending applications: ${response.statusText}`);
   }
 
-  return response.json() as Promise<OGAApplication[]>;
+  return response.json() as Promise<PaginatedResponse<OGAApplication>>;
 }
 
 // Fetch application detail by taskId from OGA Service

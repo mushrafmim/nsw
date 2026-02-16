@@ -1,5 +1,3 @@
-import type {JsonSchema, UISchemaElement} from "../components/JsonForm";
-
 export interface UIConfig {
   branding: {
     appName: string;
@@ -15,15 +13,4 @@ export interface UIConfig {
     consignmentManagement: boolean;
     reportingDashboard: boolean;
   },
-  reviewConfigs: {
-    defaultFormId: string;
-    forms: {
-      reviewType: string;
-      reviewDocumentId: string;
-      form: {
-        schema: JsonSchema;
-        uiSchema: UISchemaElement;
-      }
-    }[]
-  }
 }

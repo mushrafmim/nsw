@@ -3,10 +3,9 @@ import {useNavigate, useSearchParams} from 'react-router-dom'
 import {Button, Badge, Spinner, Text, Card, Flex, Box, Callout} from '@radix-ui/themes'
 import {ArrowLeftIcon, CheckCircledIcon, ExclamationTriangleIcon, InfoCircledIcon} from '@radix-ui/react-icons'
 import {fetchApplicationDetail, submitReview, type OGAApplication} from '../api'
-import {appConfig} from '../config'
 import {JsonForm, useJsonForm, type UISchemaElement, type JsonSchema} from "../components/JsonForm";
 
-const EMPTY_SCHEMA: JsonSchema = { type: 'object', properties: {} }
+const EMPTY_SCHEMA: JsonSchema = {type: 'object', properties: {}}
 
 export function WorkflowDetailScreen() {
   const navigate = useNavigate()
@@ -57,15 +56,7 @@ export function WorkflowDetailScreen() {
       try {
         const data = await fetchApplicationDetail(taskId)
         setApplication(data)
-
-        const formId = data.meta?.verificationId
-        const config = appConfig.reviewConfigs.forms.find(
-          f => f.reviewDocumentId === (formId ?? appConfig.reviewConfigs.defaultFormId)
-        )
-
-        if (config) {
-          setFormConfig({ schema: config.form.schema, uiSchema: config.form.uiSchema })
-        }
+        setFormConfig({schema: data.form.schema, uiSchema: data.form.uiSchema})
       } catch (err) {
         setError('Failed to load application details')
         console.error(err)
