@@ -220,7 +220,7 @@ func (tm *taskManager) InitTask(ctx context.Context, request InitTaskRequest) (*
 		globalStateCopy[k] = v
 	}
 
-	activeTask := container.NewContainer(request.TaskID, request.WorkflowID, request.WorkflowNodeTemplateID, "", globalStateCopy, localStateManager, tm.store, exec.Plugin, exec.FSM)
+	activeTask := container.NewContainer(request.TaskID, request.WorkflowID, request.WorkflowNodeTemplateID, plugin.Initialized, globalStateCopy, localStateManager, tm.store, exec.Plugin, exec.FSM)
 
 	// Convert request.Config to json.RawMessage
 	configBytes, err := json.Marshal(request.Config)
@@ -240,7 +240,7 @@ func (tm *taskManager) InitTask(ctx context.Context, request InitTaskRequest) (*
 		WorkflowID:             request.WorkflowID,
 		WorkflowNodeTemplateID: request.WorkflowNodeTemplateID,
 		Type:                   request.Type,
-		State:                  plugin.InProgress,
+		State:                  plugin.Initialized,
 		Config:                 configBytes,
 		GlobalContext:          globalContextBytes,
 	}

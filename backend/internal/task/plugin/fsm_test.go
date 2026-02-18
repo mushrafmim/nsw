@@ -184,13 +184,13 @@ func TestNewSimpleFormFSM(t *testing.T) {
 			name:          "start from empty — no task state change",
 			currentState:  "",
 			action:        FSMActionStart,
-			wantNextState: string(Initialized),
+			wantNextState: string(SimpleFormInitialized),
 			wantTaskState: "",
 		},
 		// DRAFT
 		{
 			name:          "draft from initialised",
-			currentState:  string(Initialized),
+			currentState:  string(SimpleFormInitialized),
 			action:        SimpleFormActionDraft,
 			wantNextState: string(TraderSavedAsDraft),
 			wantTaskState: InProgress,
@@ -205,7 +205,7 @@ func TestNewSimpleFormFSM(t *testing.T) {
 		// SUBMIT (no OGA)
 		{
 			name:          "submit complete from initialised",
-			currentState:  string(Initialized),
+			currentState:  string(SimpleFormInitialized),
 			action:        simpleFormFSMSubmitComplete,
 			wantNextState: string(TraderSubmitted),
 			wantTaskState: Completed,
@@ -220,7 +220,7 @@ func TestNewSimpleFormFSM(t *testing.T) {
 		// SUBMIT (await OGA)
 		{
 			name:          "submit await oga from initialised",
-			currentState:  string(Initialized),
+			currentState:  string(SimpleFormInitialized),
 			action:        simpleFormFSMSubmitAwaitOGA,
 			wantNextState: string(OGAAcknowledged),
 			wantTaskState: InProgress,
@@ -256,13 +256,13 @@ func TestNewSimpleFormFSM(t *testing.T) {
 		},
 		{
 			name:         "oga approved not permitted before oga acknowledged",
-			currentState: string(Initialized),
+			currentState: string(SimpleFormInitialized),
 			action:       simpleFormFSMOgaApproved,
 			wantErr:      true,
 		},
 		{
 			name:         "start not permitted twice",
-			currentState: string(Initialized),
+			currentState: string(SimpleFormInitialized),
 			action:       FSMActionStart,
 			wantErr:      true,
 		},

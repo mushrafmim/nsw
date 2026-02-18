@@ -38,11 +38,11 @@ const (
 type SimpleFormState string
 
 const (
-	Initialized        SimpleFormState = "INITIALIZED"
-	TraderSavedAsDraft SimpleFormState = "DRAFT"
-	TraderSubmitted    SimpleFormState = "SUBMITTED"
-	OGAAcknowledged    SimpleFormState = "OGA_ACKNOWLEDGED"
-	OGAReviewed        SimpleFormState = "OGA_REVIEWED"
+	SimpleFormInitialized SimpleFormState = "INITIALIZED"
+	TraderSavedAsDraft    SimpleFormState = "DRAFT"
+	TraderSubmitted       SimpleFormState = "SUBMITTED"
+	OGAAcknowledged       SimpleFormState = "OGA_ACKNOWLEDGED"
+	OGAReviewed           SimpleFormState = "OGA_REVIEWED"
 )
 
 const TasksAPIPath = "/api/v1/tasks"
@@ -118,16 +118,16 @@ type SimpleForm struct {
 //	OGA_ACKNOWLEDGED ──OGA_VERIFICATION_REJECTED──► OGA_REVIEWED     [FAILED]
 func NewSimpleFormFSM() *PluginFSM {
 	return NewPluginFSM(map[TransitionKey]TransitionOutcome{
-		{"", FSMActionStart}: {string(Initialized), ""},
+		{"", FSMActionStart}: {string(SimpleFormInitialized), ""},
 
-		{string(Initialized), SimpleFormActionDraft}:        {string(TraderSavedAsDraft), InProgress},
-		{string(TraderSavedAsDraft), SimpleFormActionDraft}: {string(TraderSavedAsDraft), InProgress},
+		{string(SimpleFormInitialized), SimpleFormActionDraft}: {string(TraderSavedAsDraft), InProgress},
+		{string(TraderSavedAsDraft), SimpleFormActionDraft}:    {string(TraderSavedAsDraft), InProgress},
 
-		{string(Initialized), simpleFormFSMSubmitComplete}:        {string(TraderSubmitted), Completed},
-		{string(TraderSavedAsDraft), simpleFormFSMSubmitComplete}: {string(TraderSubmitted), Completed},
+		{string(SimpleFormInitialized), simpleFormFSMSubmitComplete}: {string(TraderSubmitted), Completed},
+		{string(TraderSavedAsDraft), simpleFormFSMSubmitComplete}:    {string(TraderSubmitted), Completed},
 
-		{string(Initialized), simpleFormFSMSubmitAwaitOGA}:        {string(OGAAcknowledged), InProgress},
-		{string(TraderSavedAsDraft), simpleFormFSMSubmitAwaitOGA}: {string(OGAAcknowledged), InProgress},
+		{string(SimpleFormInitialized), simpleFormFSMSubmitAwaitOGA}: {string(OGAAcknowledged), InProgress},
+		{string(TraderSavedAsDraft), simpleFormFSMSubmitAwaitOGA}:    {string(OGAAcknowledged), InProgress},
 
 		{string(OGAAcknowledged), simpleFormFSMOgaApproved}: {string(OGAReviewed), Completed},
 		{string(OGAAcknowledged), simpleFormFSMOgaRejected}: {string(OGAReviewed), Failed},
@@ -460,7 +460,7 @@ func (s *SimpleForm) parseAndStoreOgaResponse(content any) (map[string]any, erro
 // resolveFormData returns the appropriate form data for the current plugin state.
 func (s *SimpleForm) resolveFormData(ctx context.Context, state SimpleFormState) (any, error) {
 	switch state {
-	case Initialized:
+	case SimpleFormInitialized:
 		return s.prepopulateFormData(ctx, s.config.FormData)
 	case TraderSavedAsDraft:
 		return s.api.ReadFromLocalStore("trader:draft")
