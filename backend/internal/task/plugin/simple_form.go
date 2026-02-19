@@ -337,6 +337,7 @@ func (s *SimpleForm) submitHandler(ctx context.Context, content any) (*Execution
 		}
 		return nil
 	})
+
 	if err != nil {
 		return &ExecutionResponse{
 			ApiResponse: &ApiResponse{
@@ -376,12 +377,6 @@ func (s *SimpleForm) submitHandler(ctx context.Context, content any) (*Execution
 				Error:   &ApiError{Code: "FORM_SUBMISSION_FAILED", Message: "Failed to submit form to external system."},
 			},
 		}, err
-	}
-
-	// persisting the trader submission data as submitted since submission is successful.
-	if err := s.api.WriteToLocalStore("trader:submission", formData); err != nil {
-		slog.Warn("failed to write form submission data to local store",
-			"formId", s.config.FormID, "submissionUrl", submissionUrl, "error", err)
 	}
 
 	if s.config.Submission != nil &&
