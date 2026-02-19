@@ -378,6 +378,12 @@ func (s *SimpleForm) submitHandler(ctx context.Context, content any) (*Execution
 		}, err
 	}
 
+	// persisting the trader submission data as submitted since submission is successful.
+	if err := s.api.WriteToLocalStore("trader:submission", formData); err != nil {
+		slog.Warn("failed to write form submission data to local store",
+			"formId", s.config.FormID, "submissionUrl", submissionUrl, "error", err)
+	}
+
 	if s.config.Submission != nil &&
 		s.config.Submission.Response != nil &&
 		s.config.Submission.Response.Mapping != nil {
