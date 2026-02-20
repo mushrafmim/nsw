@@ -148,12 +148,6 @@ function TraderForm(props: { formInfo: TaskFormData, pluginState: string }) {
 }
 
 function SubmissionResponseForm(props: { formInfo: TaskFormData }) {
-  const form = useJsonForm({
-    schema: props.formInfo.schema,
-    data: props.formInfo.formData,
-    onSubmit: () => {
-    },
-  })
 
   return (
     <div className="mt-6 border-l-4 border-emerald-500 rounded-r-lg overflow-hidden shadow-sm">
@@ -170,7 +164,7 @@ function SubmissionResponseForm(props: { formInfo: TaskFormData }) {
       </div>
 
       <div className="bg-white border-t border-emerald-100 p-6">
-        <JsonForm
+        <JsonForms
           schema={props.formInfo.schema}
           uiSchema={props.formInfo.uiSchema}
           values={form.values}
