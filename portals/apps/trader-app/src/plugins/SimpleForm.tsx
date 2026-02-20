@@ -166,13 +166,10 @@ function SubmissionResponseForm(props: { formInfo: TaskFormData }) {
       <div className="bg-white border-t border-emerald-100 p-6">
         <JsonForms
           schema={props.formInfo.schema}
-          uiSchema={props.formInfo.uiSchema}
-          values={form.values}
-          errors={form.errors}
-          touched={form.touched}
-          setValue={form.setValue}
-          setTouched={form.setTouched}
-          readOnly={true}
+          uischema={props.formInfo.uiSchema}
+          data={props.formInfo.formData}
+          renderers={radixRenderers}
+          readonly={true}
         />
       </div>
     </div>
