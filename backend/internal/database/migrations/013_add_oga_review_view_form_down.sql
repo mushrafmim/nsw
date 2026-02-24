@@ -1,0 +1,2 @@
+DELETE FROM forms
+WHERE id = 'd0c3b860-635b-4124-8081-d3f421e429cb';

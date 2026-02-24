@@ -45,6 +45,8 @@ MIGRATIONS=(
     "010_add_review_response_form.sql"
     "011_add_unlock_configuration.sql"
     "011_insert_unlock_config_seed.sql"
+    "012_add_conditional_state_identification.sql"
+    "013_add_oga_review_view_form.sql"
 )
 
 echo "Starting database migrations..."

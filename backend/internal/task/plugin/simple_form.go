@@ -83,7 +83,7 @@ type SubmissionConfig struct {
 }
 
 type CallbackConfig struct {
-	Transition *TransitionConfig `json:"transition"`
+	Transition *TransitionConfig `json:"transition,omitempty"`
 	Response   *Response         `json:"response,omitempty"`
 }
 
