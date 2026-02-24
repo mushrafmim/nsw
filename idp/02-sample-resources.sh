@@ -108,33 +108,124 @@ fi
 echo ""
 
 # ============================================================================
+# Fetch Classic Theme ID
+# ============================================================================
+log_info "Fetching Classic theme..."
+
+CLASSIC_THEME_ID=""
+RESPONSE=$(thunder_api_call GET "/design/themes")
+HTTP_CODE="${RESPONSE: -3}"
+BODY="${RESPONSE%???}"
+
+if [[ "$HTTP_CODE" == "200" ]]; then
+    # Extract theme ID for "Classic" theme by displayName
+    # Parse JSON to find theme with displayName "Classic"
+    CLASSIC_THEME_ID=$(echo "$BODY" | grep -o '{[^}]*"displayName":"Classic"[^}]*}' | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+    
+    if [[ -n "$CLASSIC_THEME_ID" ]]; then
+        log_success "Found Classic theme with ID: $CLASSIC_THEME_ID"
+    else
+        log_warning "Classic theme not found, will use default theme"
+    fi
+else
+    log_warning "Failed to fetch themes (HTTP $HTTP_CODE), will use default theme"
+fi
+
+echo ""
+
+# ============================================================================
+# Fetch Default Authentication and Registration Flows
+# ============================================================================
+log_info "Fetching default authentication and registration flows..."
+
+AUTH_FLOW_ID=""
+REG_FLOW_ID=""
+
+# Fetch authentication flow (default-basic-flow)
+RESPONSE=$(thunder_api_call GET "/flows?limit=30&offset=0&flowType=AUTHENTICATION")
+HTTP_CODE="${RESPONSE: -3}"
+BODY="${RESPONSE%???}"
+
+if [[ "$HTTP_CODE" == "200" ]]; then
+    # Extract flow ID for "default-basic-flow" by handle
+    AUTH_FLOW_ID=$(echo "$BODY" | grep -o '{[^}]*"handle":"default-basic-flow"[^}]*}' | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+    
+    if [[ -n "$AUTH_FLOW_ID" ]]; then
+        log_success "Found default authentication flow with ID: $AUTH_FLOW_ID"
+    else
+        log_warning "Default authentication flow not found"
+    fi
+else
+    log_warning "Failed to fetch authentication flows (HTTP $HTTP_CODE)"
+fi
+
+# Fetch registration flow (default-basic-flow)
+RESPONSE=$(thunder_api_call GET "/flows?limit=30&offset=0&flowType=REGISTRATION")
+HTTP_CODE="${RESPONSE: -3}"
+BODY="${RESPONSE%???}"
+
+if [[ "$HTTP_CODE" == "200" ]]; then
+    # Extract flow ID for "default-basic-flow" by handle
+    REG_FLOW_ID=$(echo "$BODY" | grep -o '{[^}]*"handle":"default-basic-flow"[^}]*}' | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+    
+    if [[ -n "$REG_FLOW_ID" ]]; then
+        log_success "Found default registration flow with ID: $REG_FLOW_ID"
+    else
+        log_warning "Default registration flow not found"
+    fi
+else
+    log_warning "Failed to fetch registration flows (HTTP $HTTP_CODE)"
+fi
+
+echo ""
+
+# ============================================================================
 # Create Trader Portal React Application
 # ============================================================================
 log_info "Creating Trader Portal React App application..."
 
+# Build theme_id field conditionally
+THEME_ID_FIELD=""
+if [[ -n "$CLASSIC_THEME_ID" ]]; then
+    THEME_ID_FIELD="\"theme_id\": \"${CLASSIC_THEME_ID}\","
+fi
+
+# Build auth_flow_id and registration_flow_id fields conditionally
+AUTH_FLOW_FIELD=""
+if [[ -n "$AUTH_FLOW_ID" ]]; then
+    AUTH_FLOW_FIELD="\"auth_flow_id\": \"${AUTH_FLOW_ID}\","
+fi
+
+REG_FLOW_FIELD=""
+if [[ -n "$REG_FLOW_ID" ]]; then
+    REG_FLOW_FIELD="\"registration_flow_id\": \"${REG_FLOW_ID}\","
+fi
+
 read -r -d '' TRADER_PORTAL_APP_PAYLOAD <<JSON || true
 {
-    "name": "Trader Portal",
-    "description": "React application for trader portal",
-    "logo_url": "https://ssl.gstatic.com/docs/common/profile/tiger_lg.png",
-    "user_attributes": [
-        "given_name",
-        "family_name",
-        "email",
-        "groups"
-    ],
-    "is_registration_flow_enabled": true,
-    "allowed_user_types": [
-        "Trader"
-    ],
+    "name": "TraderApp",
+    "description": "Application for trader portal built with React",
+    ${THEME_ID_FIELD}
+    ${AUTH_FLOW_FIELD}
+    ${REG_FLOW_FIELD}
+    "is_registration_flow_enabled": false,
     "template": "react",
+    "logo_url": "https://ssl.gstatic.com/docs/common/profile/kiwi_lg.png",
+    "assertion": {
+        "validity_period": 3600
+    },
+    "certificate": {
+        "type": "NONE"
+    },
     "inbound_auth_config": [
         {
             "type": "oauth2",
             "config": {
                 "client_id": "TRADER_PORTAL_APP",
-                "public_client": true,
-                "pkce_required": true,
+                "redirect_uris": [
+                    "http://localhost:5173",
+                    "https://localhost:5173"
+                ],
                 "grant_types": [
                     "authorization_code",
                     "refresh_token"
@@ -142,17 +233,44 @@ read -r -d '' TRADER_PORTAL_APP_PAYLOAD <<JSON || true
                 "response_types": [
                     "code"
                 ],
-                "redirect_uris": [
-                    "http://localhost:5173"
-                ],
                 "token_endpoint_auth_method": "none",
+                "pkce_required": true,
+                "public_client": true,
+                "token": {
+                    "access_token": {
+                        "validity_period": 3600,
+                        "user_attributes": [
+                            "email",
+                            "family_name",
+                            "given_name"
+                        ]
+                    },
+                    "id_token": {
+                        "validity_period": 3600,
+                        "user_attributes": [
+                            "family_name",
+                            "given_name",
+                            "email"
+                        ]
+                    }
+                },
                 "scopes": [
                     "openid",
                     "profile",
                     "email"
-                ]
+                ],
+                "user_info": {
+                    "user_attributes": [
+                        "family_name",
+                        "given_name",
+                        "email"
+                    ]
+                }
             }
         }
+    ],
+    "allowed_user_types": [
+        "Trader"
     ]
 }
 JSON
@@ -186,6 +304,72 @@ elif [[ "$HTTP_CODE" == "400" ]] && [[ "$BODY" =~ (Application already exists|AP
     log_warning "Trader Portal React App already exists, skipping"
 else
     log_error "Failed to create Trader Portal React App (HTTP $HTTP_CODE)"
+    echo "Response: $BODY"
+    exit 1
+fi
+
+echo ""
+# ============================================================================
+# Add a sample user of user type Trader
+# ============================================================================
+log_info "Creating sample trader user..."
+read -r -d '' SAMPLE_USER_PAYLOAD <<JSON || true
+{
+    "type": "Trader",
+    "organizationUnit": "${TRADER_OU_ID}",
+    "attributes": {
+        "username": "user123",
+        "password": "1234",
+        "sub": "user123",
+        "email": "user123@trader.dev",
+        "email_verified": true,
+        "name": "Sample Trader",
+        "given_name": "User",
+        "family_name": "Trader"
+    }
+}
+JSON
+
+RESPONSE=$(thunder_api_call POST "/users" "${SAMPLE_USER_PAYLOAD}")
+HTTP_CODE="${RESPONSE: -3}"
+BODY="${RESPONSE%???}"
+if [[ "$HTTP_CODE" == "201" ]] || [[ "$HTTP_CODE" == "200" ]]; then
+    log_success "Sample trader user created successfully"
+    log_info "Username: user123"
+    log_info "Password: 1234"
+
+    SAMPLE_TRADER_USER_ID=$(echo "$BODY" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+    if [[ -z "$SAMPLE_TRADER_USER_ID" ]]; then
+        log_warning "Could not extract sample trader user ID from response"
+    else
+        log_info "Sample trader user ID: $SAMPLE_TRADER_USER_ID"
+    fi
+elif [[ "$HTTP_CODE" == "409" ]]; then
+    log_warning "Sample trader user already exists, retrieving user ID..."
+
+    RESPONSE=$(thunder_api_call GET "/users")
+    HTTP_CODE="${RESPONSE: -3}"
+    BODY="${RESPONSE%???}"
+
+    if [[ "$HTTP_CODE" == "200" ]]; then
+        SAMPLE_TRADER_USER_ID=$(echo "$BODY" | grep -o '"id":"[^"]*","[^"]*":"[^"]*","attributes":{[^}]*"username":"user123"' | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+        if [[ -z "$SAMPLE_TRADER_USER_ID" ]]; then
+            SAMPLE_TRADER_USER_ID=$(echo "$BODY" | sed 's/},{/}\n{/g' | grep '"username":"user123"' | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+        fi
+
+        if [[ -n "$SAMPLE_TRADER_USER_ID" ]]; then
+            log_success "Found sample trader user ID: $SAMPLE_TRADER_USER_ID"
+        else
+            log_error "Could not find sample trader user in response"
+            exit 1
+        fi
+    else
+        log_error "Failed to fetch users (HTTP $HTTP_CODE)"
+        exit 1
+    fi
+else
+    log_error "Failed to create sample trader user (HTTP $HTTP_CODE)"
     echo "Response: $BODY"
     exit 1
 fi
