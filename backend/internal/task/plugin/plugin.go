@@ -60,6 +60,7 @@ type ExecutionResponse struct {
 	ExtendedState       *string
 	Outcome             *string
 	AppendGlobalContext map[string]any
+	EmittedOutcome      *string
 	Message             string
 	ApiResponse         *ApiResponse
 }

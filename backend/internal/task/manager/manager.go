@@ -269,7 +269,7 @@ func (tm *taskManager) start(ctx context.Context, activeTask *container.Containe
 
 	// Notify the workflow manager of the initial state after starting the task (e.g., InProgress). This ensures that
 	//the workflow manager is aware of the task's state change immediately after initialization.
-	tm.notifyWorkflowManager(ctx, activeTask.TaskID, result.NewState, result.ExtendedState, result.AppendGlobalContext, result.Outcome)
+	tm.notifyWorkflowManager(ctx, activeTask.TaskID, result.NewState, result.ExtendedState, result.AppendGlobalContext, nil)
 
 	return &InitTaskResponse{Success: true}, nil
 }
@@ -283,7 +283,7 @@ func (tm *taskManager) execute(ctx context.Context, activeTask *container.Contai
 	}
 
 	if result.NewState != nil {
-		tm.notifyWorkflowManager(ctx, activeTask.TaskID, result.NewState, result.ExtendedState, result.AppendGlobalContext, result.Outcome)
+		tm.notifyWorkflowManager(ctx, activeTask.TaskID, result.NewState, result.ExtendedState, result.AppendGlobalContext, result.EmittedOutcome)
 	}
 
 	return result, nil

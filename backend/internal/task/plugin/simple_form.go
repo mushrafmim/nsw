@@ -69,6 +69,7 @@ type Config struct {
 	SubmissionURL           string            `json:"submissionUrl,omitempty"` // URL to submit form data to (optional)
 	Submission              *SubmissionConfig `json:"submission,omitempty"`    // Submission configuration (optional)
 	Callback                *CallbackConfig   `json:"callback,omitempty"`
+	Emission                *EmissionConfig   `json:"emission,omitempty"`                // Outcomes emitted at terminal states, evaluated against local store context
 	RequiresOgaVerification bool              `json:"requiresOgaVerification,omitempty"` // If true, waits for OGA_VERIFICATION action; if false, completes after submission response
 }
 
@@ -478,6 +479,7 @@ func (s *SimpleForm) ogaApprovedHandler(_ context.Context, content any) (*Execut
 
 	return &ExecutionResponse{
 		AppendGlobalContext: globalContextPairs,
+		EmittedOutcome:      s.evaluateEmissions(),
 		Message:             "Form verified by OGA, task completed",
 	}, nil
 }
@@ -487,7 +489,40 @@ func (s *SimpleForm) ogaRejectedHandler(_ context.Context, content any) (*Execut
 	if _, err := s.parseAndStoreOgaResponse(content); err != nil {
 		return nil, err
 	}
-	return &ExecutionResponse{Message: "Verification rejected or invalid"}, nil
+	return &ExecutionResponse{
+		EmittedOutcome: s.evaluateEmissions(),
+		Message:        "Verification rejected or invalid",
+	}, nil
+}
+
+// evaluateEmissions evaluates the root-level emission rules against the full local store context.
+// It is called at terminal states (OGA approved / rejected) once all local store keys are populated.
+func (s *SimpleForm) evaluateEmissions() *string {
+	if s.config.Emission == nil {
+		return nil
+	}
+	return s.config.Emission.Evaluate(s.buildLocalContext())
+}
+
+// localStoreKeys lists every key written to the local store during a SimpleForm lifecycle.
+// They are namespaced as top-level keys in the context map, so condition field paths take
+// the form "<storeKey>.<field>", e.g. "ogaResponse.decision" or "trader:form.species".
+var localStoreKeys = []string{"trader:form", "submissionResponse", "ogaResponse"}
+
+// buildLocalContext reads all known local store entries and assembles them into a single
+// namespaced map for emission evaluation.
+func (s *SimpleForm) buildLocalContext() map[string]any {
+	ctx := make(map[string]any)
+	for _, key := range localStoreKeys {
+		val, err := s.api.ReadFromLocalStore(key)
+		if err != nil || val == nil {
+			continue
+		}
+		if m, ok := val.(map[string]any); ok {
+			ctx[key] = m
+		}
+	}
+	return ctx
 }
 
 // parseAndStoreOgaResponse parses the OGA payload and persists it to local store.
