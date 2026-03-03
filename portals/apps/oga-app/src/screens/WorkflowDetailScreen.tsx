@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Button, Badge, Spinner, Text, Card, Flex, Box, Callout } from '@radix-ui/themes'
 import { ArrowLeftIcon, CheckCircledIcon, ExclamationTriangleIcon, InfoCircledIcon } from '@radix-ui/react-icons'
-import { fetchApplicationDetail, submitReview, type OGAApplication } from '../api'
+import { fetchApplicationDetail, submitReview, submitFeedback, type OGAApplication } from '../api'
 import { JsonForms } from '@jsonforms/react';
 import { radixRenderers } from '@opennsw/jsonforms-renderers';
 import type { JsonSchema, UISchemaElement } from '@jsonforms/core';
@@ -23,6 +23,25 @@ export function WorkflowDetailScreen() {
   const [formConfig, setFormConfig] = useState<{ schema: JsonSchema; uiSchema: UISchemaElement } | null>(null)
   const [formData, setFormData] = useState<Record<string, unknown>>({})
   const [formErrors, setFormErrors] = useState<any[]>([])
+
+  const [showFeedbackInput, setShowFeedbackInput] = useState(false)
+  const [feedbackText, setFeedbackText] = useState('')
+  const [isSendingFeedback, setIsSendingFeedback] = useState(false)
+
+  const handleSendFeedback = async () => {
+    if (!taskId || !feedbackText.trim()) return
+    setIsSendingFeedback(true)
+    setError(null)
+    try {
+      await submitFeedback(taskId, { feedback: feedbackText.trim() })
+      setSuccess(true)
+      setTimeout(() => navigate('/workflows'), 2000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send feedback')
+    } finally {
+      setIsSendingFeedback(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -272,40 +291,123 @@ export function WorkflowDetailScreen() {
 
               <div className="border-t border-gray-100 my-4"></div>
 
-              {formConfig && (
+              {/* Feedback history */}
+              {application.feedbackHistory && application.feedbackHistory.length > 0 && (
+                <div className="mb-4 rounded-lg border border-amber-200 overflow-hidden">
+                  <div className="bg-amber-50 px-4 py-2 border-b border-amber-200">
+                    <Text size="1" weight="bold" className="uppercase tracking-wider text-amber-700">
+                      Feedback History
+                    </Text>
+                  </div>
+                  <div className="divide-y divide-amber-100">
+                    {application.feedbackHistory.map((entry) => (
+                      <div key={entry.round} className="bg-white px-4 py-3">
+                        <Flex justify="between" mb="1">
+                          <Text size="1" weight="bold" color="amber">Round {entry.round}</Text>
+                          <Text size="1" color="gray">{new Date(entry.timestamp).toLocaleString()}</Text>
+                        </Flex>
+                        <Text size="2" className="whitespace-pre-wrap">
+                          {entry.content.feedback as string}
+                        </Text>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {formConfig && application.status === 'PENDING' || application.status === 'FEEDBACK_REQUESTED' ? (
+                <>
+                  {/* Feedback input — shown when reviewer clicks Request Changes */}
+                  {showFeedbackInput && (
+                    <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                      <Text size="2" weight="bold" color="amber" as="div" mb="2">
+                        Request Changes
+                      </Text>
+                      <textarea
+                        className="w-full rounded border border-amber-300 bg-white p-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-400"
+                        rows={4}
+                        placeholder="Describe what the trader needs to correct..."
+                        value={feedbackText}
+                        onChange={(e) => setFeedbackText(e.target.value)}
+                      />
+                      <Flex gap="2" mt="2" justify="end">
+                        <Button
+                          variant="soft"
+                          color="gray"
+                          size="2"
+                          type="button"
+                          onClick={() => { setShowFeedbackInput(false); setFeedbackText('') }}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          color="amber"
+                          size="2"
+                          type="button"
+                          disabled={isSendingFeedback || !feedbackText.trim()}
+                          onClick={() => { void handleSendFeedback() }}
+                        >
+                          {isSendingFeedback ? <Spinner size="1" /> : null}
+                          Send Feedback
+                        </Button>
+                      </Flex>
+                    </div>
+                  )}
+
+                  {formConfig && (
+                    <form onSubmit={handleSubmit} noValidate>
+                      <JsonForms
+                        schema={formConfig.schema}
+                        uischema={formConfig.uiSchema}
+                        data={formData}
+                        renderers={radixRenderers}
+                        onChange={({ data, errors }) => {
+                          setFormData(data);
+                          setFormErrors(errors || []);
+                        }}
+                      />
+                      <Flex justify="end" gap="3" mt="6">
+                        <Button
+                          variant="soft"
+                          color="gray"
+                          onClick={() => { void navigate('/workflows') }}
+                          disabled={isSubmitting || isSendingFeedback}
+                          type="button"
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          variant="soft"
+                          color="amber"
+                          type="button"
+                          disabled={isSubmitting || isSendingFeedback || showFeedbackInput}
+                          onClick={() => setShowFeedbackInput(true)}
+                        >
+                          Request Changes
+                        </Button>
+                        <Button type="submit" disabled={isSubmitting || isSendingFeedback}>
+                          {isSubmitting ? <Spinner size="1" /> : null}
+                          Submit Review
+                        </Button>
+                      </Flex>
+                    </form>
+                  )}
+                </>
+              ) : formConfig ? (
                 <form onSubmit={handleSubmit} noValidate>
                   <JsonForms
                     schema={formConfig.schema}
                     uischema={formConfig.uiSchema}
                     data={formData}
                     renderers={radixRenderers}
+                    readonly
                     onChange={({ data, errors }) => {
                       setFormData(data);
                       setFormErrors(errors || []);
                     }}
                   />
-                  <Flex justify="end" gap="3" mt="6">
-                    <Button
-                      variant="soft"
-                      color="gray"
-                      onClick={() => {
-                        void navigate('/workflows')
-                      }}
-                      disabled={isSubmitting}
-                      type="button"
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="submit"
-                      disabled={isSubmitting}
-                    >
-                      {isSubmitting ? <Spinner size="1" /> : null}
-                      Submit Review
-                    </Button>
-                  </Flex>
                 </form>
-              )}
+              ) : null}
             </div>
           </Card>
         </div>

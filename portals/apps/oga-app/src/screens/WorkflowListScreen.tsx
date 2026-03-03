@@ -106,6 +106,7 @@ export function WorkflowListScreen() {
               <Select.Content>
                 <Select.Item value="all">All Statuses</Select.Item>
                 <Select.Item value="PENDING">Pending</Select.Item>
+                <Select.Item value="FEEDBACK_REQUESTED">Feedback Requested</Select.Item>
                 <Select.Item value="APPROVED">Approved</Select.Item>
                 <Select.Item value="REJECTED">Rejected</Select.Item>
               </Select.Content>
@@ -160,7 +161,8 @@ export function WorkflowListScreen() {
                           color={
                             app.status === 'APPROVED' ? 'green' :
                               app.status === 'REJECTED' ? 'red' :
-                                'blue'
+                                app.status === 'FEEDBACK_REQUESTED' ? 'amber' :
+                                  'blue'
                           }
                           variant="surface"
                         >
