@@ -14,12 +14,14 @@ import (
 	"github.com/OpenNSW/nsw/internal/payments"
 	taskmanager "github.com/OpenNSW/nsw/internal/task/manager"
 	"github.com/OpenNSW/nsw/internal/task/plugin"
+	"github.com/OpenNSW/nsw/internal/taskworkflow"
 	"github.com/OpenNSW/nsw/internal/temporal"
 	"github.com/OpenNSW/nsw/internal/uploads"
 	"github.com/OpenNSW/nsw/internal/uploads/drivers"
 	"github.com/OpenNSW/nsw/internal/workflow/router"
 	workflowruntime "github.com/OpenNSW/nsw/internal/workflow/runtime"
 	"github.com/OpenNSW/nsw/internal/workflow/service"
+	"github.com/OpenNSW/nsw/pkg/remote"
 
 	"github.com/OpenNSW/nsw/pkg/notification"
 	"github.com/OpenNSW/nsw/pkg/notification/channels"
@@ -71,13 +73,6 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	paymentRepo := payments.NewPaymentRepository(db)
 	paymentService := payments.NewPaymentService(paymentRepo)
 
-	factory := plugin.NewTaskFactory(cfg, db, paymentService)
-	tm, err := taskmanager.NewTaskManager(db, factory)
-	if err != nil {
-		_ = database.Close(db)
-		return nil, fmt.Errorf("failed to create task manager: %w", err)
-	}
-
 	templateService := service.NewTemplateService(db)
 	chaService := service.NewCHAService(db)
 	hsCodeService := service.NewHSCodeService(db)
@@ -88,8 +83,36 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("failed to create temporal client: %w", err)
 	}
 
+	rm := remote.NewManager()
+
+	err = rm.LoadServices(cfg.Server.ServicesConfigPath)
+
+	if err != nil {
+		return nil, err
+	}
+
+	var taskManagerClose func() error
+	var tm taskmanager.TaskManager
+	if cfg.TaskWorkflow.Enabled {
+		tm = taskworkflow.WireTaskManagerAsLegacy(temporalClient, db, templateService, paymentService, rm)
+		if closer, ok := tm.(interface{ Close() error }); ok {
+			taskManagerClose = closer.Close
+		}
+	} else {
+		factory := plugin.NewTaskFactory(cfg, db, paymentService)
+		tm, err = taskmanager.NewTaskManager(db, factory)
+		if err != nil {
+			temporalClient.Close()
+			_ = database.Close(db)
+			return nil, fmt.Errorf("failed to create task manager: %w", err)
+		}
+	}
+
 	workflowRuntime, err := workflowruntime.NewRuntime(temporalClient, tm, templateService)
 	if err != nil {
+		if taskManagerClose != nil {
+			_ = taskManagerClose()
+		}
 		temporalClient.Close()
 		_ = database.Close(db)
 		return nil, fmt.Errorf("failed to create workflow runtime: %w", err)
@@ -226,6 +249,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 
 		if err := workflowRuntime.Close(); err != nil {
 			closeErrs = append(closeErrs, fmt.Errorf("failed to close workflow runtime: %w", err))
+		}
+		if taskManagerClose != nil {
+			if err := taskManagerClose(); err != nil {
+				closeErrs = append(closeErrs, fmt.Errorf("failed to close task workflow manager: %w", err))
+			}
 		}
 		temporalClient.Close()
 		if err := authManager.Close(); err != nil {

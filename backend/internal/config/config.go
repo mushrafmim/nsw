@@ -23,6 +23,7 @@ type Config struct {
 	Storage      uploads.Config
 	Auth         auth.Config
 	Notification NotificationConfig
+	TaskWorkflow TaskWorkflowConfig
 	Temporal     temporal.Config
 }
 
@@ -51,6 +52,10 @@ type NotificationConfig struct {
 	SMTPPassword string
 	SMTPSender   string
 	TemplateRoot string
+}
+
+type TaskWorkflowConfig struct {
+	Enabled bool
 }
 
 // Load reads configuration from environment variables
@@ -124,6 +129,9 @@ func Load() (*Config, error) {
 			Host:      getEnvOrDefault("TEMPORAL_HOST", "localhost"),
 			PortRaw:   getEnvOrDefault("TEMPORAL_PORT", "7233"),
 			Namespace: getEnvOrDefault("TEMPORAL_NAMESPACE", "default"),
+		},
+		TaskWorkflow: TaskWorkflowConfig{
+			Enabled: getBoolOrDefault("TASK_WORKFLOW_ENABLED", false),
 		},
 	}
 

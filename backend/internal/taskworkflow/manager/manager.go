@@ -1,0 +1,168 @@
+package manager
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+
+	workflowmanager "github.com/OpenNSW/go-temporal-workflow"
+	"github.com/OpenNSW/nsw/internal/task/plugin"
+	"github.com/OpenNSW/nsw/internal/taskworkflow/persistence"
+	"github.com/OpenNSW/nsw/internal/workflow/service"
+	"go.temporal.io/sdk/client"
+)
+
+// TaskWorkflowManager orchestrates task-level micro-workflows using go-temporal-workflow.
+type TaskWorkflowManager interface {
+	InitTask(ctx context.Context, input InitTaskInput) error
+	ExecuteAction(ctx context.Context, req ExecutionRequest) error
+}
+
+type taskWorkflowManager struct {
+	temporalManager workflowmanager.TemporalManager
+	store           persistence.Store
+	commandStore    persistence.CommandStore
+	templateService service.TemplateProvider
+	executors       map[string]ActionExecutor
+}
+
+// NewTaskWorkflowManager creates a new TaskWorkflowManager.
+func NewTaskWorkflowManager(
+	tc client.Client,
+	taskQueue string,
+	store persistence.Store,
+	commandStore persistence.CommandStore,
+	templateService service.TemplateProvider,
+	activationHandler workflowmanager.TaskActivationHandler,
+	completionHandler workflowmanager.WorkflowCompletionHandler,
+) TaskWorkflowManager {
+	tm := workflowmanager.NewTemporalManager(tc, taskQueue, activationHandler, completionHandler)
+	return &taskWorkflowManager{
+		temporalManager: tm,
+		store:           store,
+		commandStore:    commandStore,
+		templateService: templateService,
+		executors:       make(map[string]ActionExecutor),
+	}
+}
+
+func (m *taskWorkflowManager) RegisterExecutor(action string, executor ActionExecutor) {
+	m.executors[action] = executor
+}
+
+func (m *taskWorkflowManager) InitTask(ctx context.Context, input InitTaskInput) error {
+	// 1. Resolve the Micro-Workflow Definition from the database
+	if input.Config.MicroWorkflowId == "" {
+		return fmt.Errorf("microWorkflowId is required in task configuration")
+	}
+
+	wt, err := m.templateService.GetWorkflowTemplateByIDV2(ctx, input.Config.MicroWorkflowId)
+	if err != nil {
+		return fmt.Errorf("failed to fetch micro-workflow template %s: %w", input.Config.MicroWorkflowId, err)
+	}
+	if wt == nil {
+		return fmt.Errorf("micro-workflow template %s not found", input.Config.MicroWorkflowId)
+	}
+
+	// 2. Create a record in task_workflow_tasks table
+	taskRecord := &persistence.TaskWorkflowTask{
+		TaskID:          input.TaskID,
+		MacroWorkflowID: input.MacroWorkflowID,
+		TaskTemplateID:  input.TaskTemplateID,
+		State:           plugin.Initialized,
+		Data:            json.RawMessage(`{}`),
+	}
+
+	if err := m.store.Create(taskRecord); err != nil {
+		return fmt.Errorf("failed to create task workflow record: %w", err)
+	}
+
+	// 3. Start the Micro-Workflow using the resolved definition
+	if err := m.temporalManager.StartWorkflow(ctx, input.TaskID, wt.WorkflowDefinition, input.InitialContext); err != nil {
+		return fmt.Errorf("failed to start micro-workflow: %w", err)
+	}
+
+	slog.InfoContext(ctx, "started micro-workflow for task", "taskId", input.TaskID, "microWorkflowId", input.Config.MicroWorkflowId)
+	return nil
+}
+
+func (m *taskWorkflowManager) ExecuteAction(ctx context.Context, req ExecutionRequest) error {
+	// 1. Lookup active command for this task
+	command, err := m.commandStore.GetActiveCommand(ctx, req.TaskID, req.Action)
+	if err != nil {
+		return fmt.Errorf("action %s not allowed for task %s: %w", req.Action, req.TaskID, err)
+	}
+
+	// 2. Fetch the node template to get configuration
+	template, err := m.templateService.GetWorkflowNodeTemplateByID(ctx, command.TaskTemplateID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch task template %s: %w", command.TaskTemplateID, err)
+	}
+
+	// 3. Prepare inputs for the executor (User's content)
+	inputs := make(map[string]any)
+	if req.Content != nil {
+		if m, ok := req.Content.(map[string]any); ok {
+			inputs = m
+		} else {
+			// Try to handle case where content is a single value or different type
+			inputs["payload"] = req.Content
+		}
+	}
+
+	// 4. Execute Business Logic (if an executor is registered)
+	var result map[string]any
+	if executor, ok := m.executors[req.Action]; ok {
+		res, err := executor(ctx, req.TaskID, inputs, template.Config)
+		if err != nil {
+			return fmt.Errorf("business logic execution failed for action %s: %w", req.Action, err)
+		}
+		result = res
+	}
+
+	// 5. Update the task rendering context (jsonb column)
+	if len(result) > 0 {
+		if err := m.updateTaskContext(ctx, req.TaskID, result); err != nil {
+			return fmt.Errorf("failed to update task context: %w", err)
+		}
+	}
+
+	// 4. Map payload for Temporal
+	output := map[string]any{
+		"action":  req.Action,
+		"content": req.Content,
+		"result":  result,
+	}
+
+	// 5. Resume the Micro-Workflow
+	if err := m.temporalManager.TaskDone(ctx, command.SubWorkflowID, command.SubWorkflowRunID, command.NodeID, output); err != nil {
+		return fmt.Errorf("failed to signal micro-workflow: %w", err)
+	}
+
+	slog.InfoContext(ctx, "executed action and resumed micro-workflow", "taskId", req.TaskID, "action", req.Action)
+	return nil
+}
+
+func (m *taskWorkflowManager) updateTaskContext(ctx context.Context, taskId string, update map[string]any) error {
+	// Merge the new key-values into the jsonb Data column.
+	task, err := m.store.GetByTaskID(taskId)
+	if err != nil {
+		return err
+	}
+
+	var currentData map[string]any
+	if len(task.Data) > 0 {
+		_ = json.Unmarshal(task.Data, &currentData)
+	}
+	if currentData == nil {
+		currentData = make(map[string]any)
+	}
+
+	for k, v := range update {
+		currentData[k] = v
+	}
+
+	newData, _ := json.Marshal(currentData)
+	return m.store.UpdateData(taskId, newData)
+}

@@ -9,8 +9,10 @@ source "$ENV_FILE_PATH"
 
 MIGRATION_DB_HOST="${MIGRATION_DB_HOST:-$DB_HOST}"
 MIGRATION_DB_HOST="${MIGRATION_DB_HOST//host.docker.internal/localhost}"
-
 DOWNS=(
+  "018_redefined_micro_workflows.down.sql"
+  "017_seed_simple_macro_workflow.down.sql"
+  "016_create_task_workflow_commands.down.sql"
   "015_fcau_workflow_seed.down.sql"
   "014_fcau_workflow_nodes_seed.down.sql"
   "013_fcau_forms_seed.down.sql"
