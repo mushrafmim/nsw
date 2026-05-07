@@ -6,13 +6,16 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/OpenNSW/nsw/internal/form"
 	"github.com/OpenNSW/nsw/internal/payments"
 	taskmanager "github.com/OpenNSW/nsw/internal/task/manager"
 	"github.com/OpenNSW/nsw/internal/task/plugin"
 	workflowmanager "github.com/OpenNSW/nsw/internal/taskworkflow/manager"
 	persistence2 "github.com/OpenNSW/nsw/internal/taskworkflow/persistence"
+	"github.com/OpenNSW/nsw/internal/taskworkflow/renderer"
 	"github.com/OpenNSW/nsw/internal/workflow/service"
 	"github.com/OpenNSW/nsw/pkg/remote"
+	"github.com/OpenNSW/nsw/pkg/uiprojector"
 	"go.temporal.io/sdk/client"
 	"gorm.io/gorm"
 )
@@ -22,6 +25,7 @@ type taskManagerAdapter struct {
 	workflowManager       workflowmanager.TaskWorkflowManager
 	store                 persistence2.Store
 	templateProvider      service.TemplateProvider
+	renderer              *renderer.TaskRenderer
 	close                 func() error
 	workflowDoneHandler   taskmanager.WorkflowDoneHandler
 	workflowUpdateHandler taskmanager.WorkflowUpdateHandler
@@ -33,17 +37,22 @@ func WireTaskManagerAsLegacy(
 	wtp service.TemplateProvider,
 	ps payments.PaymentService,
 	rm *remote.Manager,
+	serviceURL string,
 ) taskmanager.TaskManager {
 	store, err := persistence2.NewTaskWorkflowStore(db)
 	if err != nil {
 		panic(err)
 	}
 
+	formService := form.NewFormService(db)
+	taskRenderer := renderer.NewTaskRenderer(formService)
+
 	adapter := &taskManagerAdapter{}
-	wm, cleanup := workflowmanager.WireTaskManagerWithCleanup(c, db, wtp, ps, rm, adapter.handleMicroWorkflowCompletion)
+	wm, cleanup := workflowmanager.WireTaskManagerWithCleanup(c, db, wtp, ps, rm, serviceURL, adapter.handleMicroWorkflowCompletion)
 	adapter.workflowManager = wm
 	adapter.store = store
 	adapter.templateProvider = wtp
+	adapter.renderer = taskRenderer
 	adapter.close = cleanup
 
 	return adapter
@@ -121,6 +130,32 @@ func (a *taskManagerAdapter) GetTaskRenderInfo(ctx context.Context, taskID strin
 		return nil, fmt.Errorf("get workflow node template %s: %w", task.TaskTemplateID, err)
 	}
 
+	// NEW: Check if this node template has a Blueprint for generalized rendering
+	var config struct {
+		Blueprint *uiprojector.Blueprint `json:"blueprint"`
+	}
+	_ = json.Unmarshal(template.Config, &config)
+
+	if config.Blueprint != nil {
+		content, err := a.renderer.Render(ctx, task, config.Blueprint)
+		if err != nil {
+			return nil, fmt.Errorf("render task %s: %w", taskID, err)
+		}
+
+		pluginState, _ := content["pluginState"].(string)
+
+		return &plugin.ApiResponse{
+			Success: true,
+			Data: plugin.GetRenderInfoResponse{
+				Type:        plugin.Type(template.Type),
+				State:       task.State,
+				PluginState: pluginState,
+				Content:     content,
+			},
+		}, nil
+	}
+
+	// FALLBACK: Legacy manual rendering logic
 	var content any
 	if len(task.Data) > 0 {
 		if err := json.Unmarshal(task.Data, &content); err != nil {

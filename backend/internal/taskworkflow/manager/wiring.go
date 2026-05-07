@@ -24,6 +24,7 @@ func WireTaskManagerWithCleanup(
 	templateService service.TemplateProvider,
 	paymentService payments.PaymentService,
 	remoteManager *remote.Manager,
+	serviceBaseURL string,
 	macroCompletionHandler func(ctx context.Context, task *persistence.TaskWorkflowTask, outputs map[string]any) error,
 ) (TaskWorkflowManager, func() error) {
 	store, _ := persistence.NewTaskWorkflowStore(db)
@@ -45,11 +46,10 @@ func WireTaskManagerWithCleanup(
 		return macroCompletionHandler(context.Background(), task, finalContext)
 	}
 
-	manager = NewTaskWorkflowManager(tc, microWorkflowTaskQueue, store, commandStore, templateService, activationHandler, completionHandler)
+	manager = NewTaskWorkflowManager(tc, microWorkflowTaskQueue, store, commandStore, templateService, activationHandler, completionHandler, serviceBaseURL)
 
 	// 1. Register Action Executors (Externalized Business Logic)
 	m := manager.(*taskWorkflowManager)
-	m.RegisterExecutor(string(ActionDataSubmission), executors.FormSubmissionExecutor)
 	m.RegisterExecutor("OGA_API_CALL", executors.NewRemoteApiExecutor(remoteManager))
 	m.RegisterExecutor(string(ActionPaymentInitiation), executors.NewPaymentInitiationExecutor(paymentService))
 

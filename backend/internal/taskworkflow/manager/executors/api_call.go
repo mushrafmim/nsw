@@ -20,6 +20,7 @@ func NewRemoteApiExecutor(rm *remote.Manager) func(context.Context, string, map[
 		// 1. Parse Node Configuration
 		var nodeConfig struct {
 			ServiceID string `json:"serviceId"`
+			TaskCode  string `json:"taskCode"`
 			Endpoint  string `json:"endpoint"`
 			Method    string `json:"method"`
 			Template  any    `json:"template"`
@@ -36,8 +37,8 @@ func NewRemoteApiExecutor(rm *remote.Manager) func(context.Context, string, map[
 		// 2. Resolve the payload template using placeholders from the inputs
 		var payload any
 		if nodeConfig.Template != nil {
-			payload = jsonutils.ResolveTemplate(nodeConfig.Template, func(path string) any {
-				// Resolve placeholders like "trader:form.species" or "consignment.destination"
+			payload = jsonutils.ResolveTemplateWithPlaceholders(nodeConfig.Template, func(path string) any {
+				// Resolve placeholders like "trader:form.species" or "__runtime.taskId"
 				val, exists := jsonform.GetValueByPath(inputs, path)
 				if !exists {
 					slog.WarnContext(ctx, "template placeholder not found in context", "path", path, "taskId", taskId)
@@ -50,7 +51,26 @@ func NewRemoteApiExecutor(rm *remote.Manager) func(context.Context, string, map[
 			payload = inputs["trader:form"]
 		}
 
-		// 3. Execute the call via remote manager
+		// 3. Extract __runtime metadata to construct a wrapped request body matching OGA's InjectRequest
+		runtime, _ := inputs["__runtime"].(map[string]any)
+		if runtime == nil {
+			runtime = make(map[string]any)
+		}
+
+		taskIdRuntime, _ := runtime["taskId"].(string)
+		consignmentIdRuntime, _ := runtime["consignmentId"].(string)
+		serviceURLRuntime, _ := runtime["serviceBaseURL"].(string)
+
+		// 4. Wrap payload into InjectRequest format
+		requestBody := map[string]any{
+			"taskId":     taskIdRuntime,
+			"taskCode":   nodeConfig.TaskCode,
+			"workflowId": consignmentIdRuntime,
+			"serviceUrl": serviceURLRuntime + "/api/v1/tasks",
+			"data":       payload,
+		}
+
+		// 5. Execute the call via remote manager
 		method := nodeConfig.Method
 		if method == "" {
 			method = "POST"
@@ -59,7 +79,7 @@ func NewRemoteApiExecutor(rm *remote.Manager) func(context.Context, string, map[
 		req := remote.Request{
 			Method: method,
 			Path:   nodeConfig.Endpoint,
-			Body:   payload,
+			Body:   requestBody,
 		}
 
 		var ogaResponse map[string]any
@@ -67,7 +87,7 @@ func NewRemoteApiExecutor(rm *remote.Manager) func(context.Context, string, map[
 			return nil, fmt.Errorf("remote API call to %s failed: %w", nodeConfig.ServiceID, err)
 		}
 
-		// 4. Return results to be merged back into the task's JSONB data context
+		// 6. Return results to be merged back into the task's JSONB data context
 		return map[string]any{
 			"oga_response": ogaResponse,
 			"submitted_to": nodeConfig.ServiceID,

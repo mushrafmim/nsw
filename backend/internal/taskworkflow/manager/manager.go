@@ -25,6 +25,7 @@ type taskWorkflowManager struct {
 	commandStore    persistence.CommandStore
 	templateService service.TemplateProvider
 	executors       map[string]ActionExecutor
+	serviceBaseURL  string
 }
 
 // NewTaskWorkflowManager creates a new TaskWorkflowManager.
@@ -36,6 +37,7 @@ func NewTaskWorkflowManager(
 	templateService service.TemplateProvider,
 	activationHandler workflowmanager.TaskActivationHandler,
 	completionHandler workflowmanager.WorkflowCompletionHandler,
+	serviceBaseURL string,
 ) TaskWorkflowManager {
 	tm := workflowmanager.NewTemporalManager(tc, taskQueue, activationHandler, completionHandler)
 	return &taskWorkflowManager{
@@ -44,6 +46,7 @@ func NewTaskWorkflowManager(
 		commandStore:    commandStore,
 		templateService: templateService,
 		executors:       make(map[string]ActionExecutor),
+		serviceBaseURL:  serviceBaseURL,
 	}
 }
 
@@ -65,20 +68,34 @@ func (m *taskWorkflowManager) InitTask(ctx context.Context, input InitTaskInput)
 		return fmt.Errorf("micro-workflow template %s not found", input.Config.MicroWorkflowId)
 	}
 
-	// 2. Create a record in task_workflow_tasks table
+	// 2. Prepare __runtime metadata for the task environment
+	runtime := map[string]any{
+		"taskId":         input.TaskID,
+		"consignmentId":  input.MacroWorkflowID,
+		"serviceBaseURL": m.serviceBaseURL,
+	}
+
+	if input.InitialContext == nil {
+		input.InitialContext = make(map[string]any)
+	}
+	input.InitialContext["__runtime"] = runtime
+
+	initialDataBytes, _ := json.Marshal(input.InitialContext)
+
+	// 3. Create a record in task_workflow_tasks table
 	taskRecord := &persistence.TaskWorkflowTask{
 		TaskID:          input.TaskID,
 		MacroWorkflowID: input.MacroWorkflowID,
 		TaskTemplateID:  input.TaskTemplateID,
 		State:           plugin.Initialized,
-		Data:            json.RawMessage(`{}`),
+		Data:            json.RawMessage(initialDataBytes),
 	}
 
 	if err := m.store.Create(taskRecord); err != nil {
 		return fmt.Errorf("failed to create task workflow record: %w", err)
 	}
 
-	// 3. Start the Micro-Workflow using the resolved definition
+	// 4. Start the Micro-Workflow using the resolved definition
 	if err := m.temporalManager.StartWorkflow(ctx, input.TaskID, wt.WorkflowDefinition, input.InitialContext); err != nil {
 		return fmt.Errorf("failed to start micro-workflow: %w", err)
 	}
@@ -111,7 +128,36 @@ func (m *taskWorkflowManager) ExecuteAction(ctx context.Context, req ExecutionRe
 		}
 	}
 
-	// 4. Execute Business Logic (if an executor is registered)
+	// Retrieve __runtime from task data or fallback to reconstruction
+	task, err := m.store.GetByTaskID(req.TaskID)
+	if err == nil && len(task.Data) > 0 {
+		var taskData map[string]any
+		if err := json.Unmarshal(task.Data, &taskData); err == nil {
+			if rt, ok := taskData["__runtime"]; ok {
+				inputs["__runtime"] = rt
+			}
+		}
+	}
+
+	// Fallback for legacy tasks or if missing in Data
+	if _, ok := inputs["__runtime"]; !ok {
+		inputs["__runtime"] = map[string]any{
+			"taskId":         command.TaskID,
+			"consignmentId":  command.MacroWorkflowID,
+			"serviceBaseURL": m.serviceBaseURL,
+		}
+	}
+
+	// 4. Read command metadata
+	var cmdMeta struct {
+		PluginState string `json:"pluginState"`
+		WriteTo     string `json:"writeTo"`
+	}
+	if len(command.Metadata) > 0 {
+		_ = json.Unmarshal(command.Metadata, &cmdMeta)
+	}
+
+	// 5. Execute business logic (AUTO nodes with a registered executor)
 	var result map[string]any
 	if executor, ok := m.executors[req.Action]; ok {
 		res, err := executor(ctx, req.TaskID, inputs, template.Config)
@@ -121,22 +167,27 @@ func (m *taskWorkflowManager) ExecuteAction(ctx context.Context, req ExecutionRe
 		result = res
 	}
 
-	// 5. Update the task rendering context (jsonb column)
-	if len(result) > 0 {
-		if err := m.updateTaskContext(ctx, req.TaskID, result); err != nil {
+	// 6. Build and apply task context update
+	update := make(map[string]any)
+
+	if cmdMeta.WriteTo != "" {
+		update[cmdMeta.WriteTo] = req.Content
+	}
+	for k, v := range result {
+		update[k] = v
+	}
+	if cmdMeta.PluginState != "" {
+		update["pluginState"] = cmdMeta.PluginState
+	}
+
+	if len(update) > 0 {
+		if err := m.updateTaskContext(ctx, req.TaskID, update); err != nil {
 			return fmt.Errorf("failed to update task context: %w", err)
 		}
 	}
 
-	// 4. Map payload for Temporal
-	output := map[string]any{
-		"action":  req.Action,
-		"content": req.Content,
-		"result":  result,
-	}
-
-	// 5. Resume the Micro-Workflow
-	if err := m.temporalManager.TaskDone(ctx, command.SubWorkflowID, command.SubWorkflowRunID, command.NodeID, output); err != nil {
+	// 9. Resume the Micro-Workflow
+	if err := m.temporalManager.TaskDone(ctx, command.SubWorkflowID, command.SubWorkflowRunID, command.NodeID, update); err != nil {
 		return fmt.Errorf("failed to signal micro-workflow: %w", err)
 	}
 

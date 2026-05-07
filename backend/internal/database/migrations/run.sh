@@ -14,7 +14,7 @@ else
     exit 1
 fi
 
-CLEAN_RUN="${CLEAN_RUN:-false}"
+CLEAN_RUN="${CLEAN_RUN:-true}"
 
 # Validate required DB environment variables
 for VAR in DB_HOST DB_PORT DB_USERNAME DB_PASSWORD DB_NAME; do

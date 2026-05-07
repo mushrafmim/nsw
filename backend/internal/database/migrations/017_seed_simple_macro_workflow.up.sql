@@ -9,11 +9,30 @@ VALUES (
     'A task node in the consignment workflow that delegates to a micro-workflow',
     'SIMPLE_FORM',
     '{
-        "renderSchemaId": "simple-form-micro-v2",
-        "microWorkflowId": "simple-form-micro-v2"
+        "microWorkflowId": "simple-form-micro-v2",
+        "blueprint": {
+            "id": "simple-form-blueprint-v1",
+            "sections": [
+                {
+                    "id": "traderFormInfo",
+                    "title": "Registration Form",
+                    "templateId": "11111111-1111-1111-1111-111111111111",
+                    "projector": "FORM",
+                    "dataKey": "trader:form"
+                },
+                {
+                    "id": "ogaReviewForm",
+                    "title": "Agency Review",
+                    "templateId": "95d7e7fe-5be0-43cb-ac71-94bc70d3a01d",
+                    "projector": "FORM",
+                    "dataKey": "oga_review",
+                    "visibleWhen": { "requireDataKey": "oga_response" }
+                }
+            ]
+        }
     }',
     '[]'
-) ON CONFLICT (id) DO NOTHING;
+) ON CONFLICT (id) DO UPDATE SET config = EXCLUDED.config;
 
 -- 2. The Macro Workflow Definition (e.g., the Consignment process).
 INSERT INTO workflow_template_v2 (id, name, version, workflow_definition)
@@ -36,7 +55,7 @@ VALUES
             { "id": "e_form_to_end", "source_id": "node_1_form", "target_id": "node_2_end" }
         ]
     }'::jsonb
-) ON CONFLICT (id) DO NOTHING;
+) ON CONFLICT (id) DO UPDATE SET workflow_definition = EXCLUDED.workflow_definition;
 
 -- 3. Map the Macro workflow to an HS code for testing.
 INSERT INTO workflow_template_maps_v2 (id, hs_code_id, consignment_flow, workflow_template_id)

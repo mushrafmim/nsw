@@ -94,7 +94,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	var taskManagerClose func() error
 	var tm taskmanager.TaskManager
 	if cfg.TaskWorkflow.Enabled {
-		tm = taskworkflow.WireTaskManagerAsLegacy(temporalClient, db, templateService, paymentService, rm)
+		tm = taskworkflow.WireTaskManagerAsLegacy(temporalClient, db, templateService, paymentService, rm, cfg.Server.ServiceURL)
 		if closer, ok := tm.(interface{ Close() error }); ok {
 			taskManagerClose = closer.Close
 		}

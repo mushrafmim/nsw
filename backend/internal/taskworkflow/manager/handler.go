@@ -26,9 +26,12 @@ func handleAtomicTaskActivation(
 	var config struct {
 		ExecutionType string `json:"executionType"` // "AUTO" or "WAIT"
 		Action        string `json:"action"`        // The action name for executors
+		PluginState   string `json:"pluginState"`
 		Commands      []struct {
 			Command       string          `json:"command"`
 			PayloadSchema json.RawMessage `json:"payloadSchema"`
+			PluginState   string          `json:"pluginState"`
+			WriteTo       string          `json:"writeTo"`
 		} `json:"commands"`
 	}
 
@@ -36,17 +39,26 @@ func handleAtomicTaskActivation(
 		return fmt.Errorf("failed to unmarshal atomic task config: %w", err)
 	}
 
-	// 3. Dispatch based on ExecutionType
+	// 3. Update Plugin State if defined in the node configuration
+	if config.PluginState != "" {
+		if err := m.updateTaskContext(ctx, payload.WorkflowID, map[string]any{
+			"pluginState": config.PluginState,
+		}); err != nil {
+			slog.WarnContext(ctx, "failed to update pluginState on node activation", "taskId", payload.WorkflowID, "error", err)
+		}
+	}
+
+	// 4. Dispatch based on ExecutionType
 	if config.ExecutionType == "AUTO" {
 		return handleAutoTask(ctx, m, template.Config, config.Action, payload)
 	}
 
-	// 4. Handle WAIT Task: Register commands in the registry
+	// 5. Handle WAIT Task: Register commands in the registry
 	var commandsToRegister []persistence.TaskWorkflowCommand
 	for _, cmd := range config.Commands {
 		commandsToRegister = append(commandsToRegister, persistence.TaskWorkflowCommand{
 			TaskID:           payload.WorkflowID, // In Micro-Workflow, WorkflowID is the TaskID
-			MacroWorkflowID:  payload.WorkflowID,
+			MacroWorkflowID:  payload.WorkflowID, // TODO: This should be the actual macro workflow ID from workflow data
 			NodeID:           payload.NodeID,
 			TaskTemplateID:   payload.TaskTemplateID,
 			SubWorkflowID:    payload.WorkflowID,
@@ -56,6 +68,13 @@ func handleAtomicTaskActivation(
 			AllowedState:     "IN_PROGRESS",
 			PayloadSchema:    cmd.PayloadSchema,
 			Active:           true,
+			Metadata: func() json.RawMessage {
+				b, _ := json.Marshal(map[string]any{
+					"pluginState": cmd.PluginState,
+					"writeTo":     cmd.WriteTo,
+				})
+				return b
+			}(),
 		})
 	}
 
@@ -71,9 +90,14 @@ func handleAutoTask(ctx context.Context, m *taskWorkflowManager, templateConfig 
 	slog.InfoContext(ctx, "executing auto task", "taskId", payload.WorkflowID, "action", action)
 
 	// 1. Execute Business Logic
+	inputs := payload.Inputs
+	if inputs == nil {
+		inputs = make(map[string]any)
+	}
+
 	var result map[string]any
 	if executor, ok := m.executors[action]; ok {
-		res, err := executor(ctx, payload.WorkflowID, payload.Inputs, templateConfig)
+		res, err := executor(ctx, payload.WorkflowID, inputs, templateConfig)
 		if err != nil {
 			return fmt.Errorf("auto task business logic failed: %w", err)
 		}
@@ -87,11 +111,11 @@ func handleAutoTask(ctx context.Context, m *taskWorkflowManager, templateConfig 
 		}
 	}
 
-	// 3. Signal Completion to Micro-Workflow
-	output := map[string]any{
-		"action": action,
-		"result": result,
+	// 3. Signal Completion to Micro-Workflow (Flat structure)
+	if result == nil {
+		result = make(map[string]any)
 	}
+	result["action"] = action
 
-	return m.temporalManager.TaskDone(ctx, payload.WorkflowID, payload.RunID, payload.NodeID, output)
+	return m.temporalManager.TaskDone(ctx, payload.WorkflowID, payload.RunID, payload.NodeID, result)
 }
